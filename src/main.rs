@@ -1,14 +1,51 @@
+use clap::{Parser, Subcommand};
 use memmap2::Mmap;
 use object::read::macho::DyldCache;
 use object::{LittleEndian, Object, ObjectSection};
 use std::error::Error;
 use std::fs::File;
 
+#[derive(Parser)]
+#[command(name = "dsc")]
+#[command(about = "A utility for inspecting Dyld Shared Cache")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Images {
+        path: String,
+    },
+    Sections {
+        path: String,
+    },
+    Dump {
+        path: String,
+        #[arg(value_parser = parse_u64)]
+        addr: u64,
+        #[arg(default_value_t = 256, value_parser = parse_u64)]
+        size: u64,
+    },
+}
+
+fn parse_u64(input: &str) -> Result<u64, String> {
+    let input = input.trim();
+    if input.to_ascii_lowercase().starts_with("0x") {
+        u64::from_str_radix(&input[2..], 16).map_err(|e| format!("Invalid hex: {}", e))
+    } else {
+        input
+            .parse::<u64>()
+            .map_err(|e| format!("Invalid number: {}", e))
+    }
+}
+
 fn with_dyld_cache<F>(path: &str, action: F) -> Result<(), Box<dyn Error>>
 where
     F: FnOnce(&DyldCache<LittleEndian>) -> Result<(), Box<dyn Error>>,
 {
-    let main_file = File::open(path)?;
+    let main_file = File::open(path).map_err(|e| format!("Failed to open {}: {}", path, e))?;
     let main_mmap = unsafe { Mmap::map(&main_file)? };
     let suffixes = DyldCache::<LittleEndian>::subcache_suffixes(&*main_mmap)?;
 
@@ -60,15 +97,6 @@ fn print_hex_dump(start_addr: u64, data: &[u8]) {
     }
 }
 
-fn parse_u64(input: &str) -> Result<u64, String> {
-    let input = input.trim();
-    if input.to_ascii_lowercase().starts_with("0x") {
-        u64::from_str_radix(&input[2..], 16).map_err(|e| e.to_string())
-    } else {
-        input.parse::<u64>().map_err(|e| e.to_string())
-    }
-}
-
 fn cmd_images(cache: &DyldCache<LittleEndian>) -> Result<(), Box<dyn Error>> {
     for image in cache.images() {
         println!("{}", image.path().unwrap_or("N/A"));
@@ -79,16 +107,17 @@ fn cmd_images(cache: &DyldCache<LittleEndian>) -> Result<(), Box<dyn Error>> {
 fn cmd_sections(cache: &DyldCache<LittleEndian>) -> Result<(), Box<dyn Error>> {
     for image in cache.images() {
         println!("{}", image.path().unwrap());
-        let obj = image.parse_object().unwrap();
-        for section in obj.sections() {
-            let base = section.address();
-            let end = base + section.size();
-            println!(
-                "  {:16} 0x{:X}-0x{:X}",
-                section.name().unwrap_or("N/A"),
-                base,
-                end
-            );
+        if let Ok(obj) = image.parse_object() {
+            for section in obj.sections() {
+                let base = section.address();
+                let end = base + section.size();
+                println!(
+                    "  {:16} 0x{:X}-0x{:X}",
+                    section.name().unwrap_or("N/A"),
+                    base,
+                    end
+                );
+            }
         }
     }
     Ok(())
@@ -123,35 +152,13 @@ fn cmd_dump(
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let args: Vec<String> = std::env::args().collect();
+    let cli = Cli::parse();
 
-    if args.len() < 2 {
-        eprintln!("Usage:");
-        eprintln!("  dsc images <path>");
-        eprintln!("  dsc dump   <path> <addr> [size]");
-        return Ok(());
-    }
-
-    let command = args[1].as_str();
-    let path = args.get(2).ok_or("Missing file path")?;
-
-    with_dyld_cache(path, |cache| {
-        match command {
-            "images" => cmd_images(cache),
-            "sections" => cmd_sections(cache),
-            "dump" => {
-                let addr_str = args.get(3).ok_or("Missing address for dump")?;
-                let vmaddr = parse_u64(addr_str).map_err(|e| format!("Invalid address: {}", e))?;
-
-                let size = if let Some(size_str) = args.get(4) {
-                    parse_u64(size_str).map_err(|e| format!("Invalid size: {}", e))? as usize
-                } else {
-                    256 // default size
-                };
-
-                cmd_dump(cache, vmaddr, size)
-            }
-            _ => Err(format!("Unknown command: {}", command).into()),
+    match &cli.command {
+        Commands::Images { path } => with_dyld_cache(path, |cache| cmd_images(cache)),
+        Commands::Sections { path } => with_dyld_cache(path, |cache| cmd_sections(cache)),
+        Commands::Dump { path, addr, size } => {
+            with_dyld_cache(path, |cache| cmd_dump(cache, *addr, *size as usize))
         }
-    })
+    }
 }
