@@ -75,7 +75,7 @@ where
 
 fn cmd_images(cache: &DyldCache<LittleEndian>) -> Result<(), Box<dyn Error>> {
     for image in cache.images() {
-        println!("{}", image.path().unwrap_or("N/A"));
+        println!("{}", image.path().unwrap_or(""));
     }
     Ok(())
 }
@@ -85,7 +85,7 @@ fn cmd_sections(
     filter_module: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
     for image in cache.images() {
-        let image_path = image.path().unwrap_or("N/A");
+        let image_path = image.path().unwrap_or("");
 
         if let Some(filter) = filter_module {
             if image_path != filter {
@@ -100,7 +100,7 @@ fn cmd_sections(
                 let end = base + section.size();
                 println!(
                     "  {:16} 0x{:X}-0x{:X}",
-                    section.name().unwrap_or("N/A"),
+                    section.name().unwrap_or(""),
                     base,
                     end
                 );
@@ -115,7 +115,7 @@ fn cmd_symbols(
     filter_module: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
     for image in cache.images() {
-        let image_path = image.path().unwrap_or("N/A");
+        let image_path = image.path().unwrap_or("");
 
         if let Some(filter) = filter_module {
             if image_path != filter {
@@ -126,11 +126,7 @@ fn cmd_symbols(
         println!("{}", image_path);
         if let Ok(obj) = image.parse_object() {
             for symbol in obj.symbols() {
-                println!(
-                    "0x{:X} {}",
-                    symbol.address(),
-                    symbol.name().unwrap_or("N/A")
-                )
+                println!("0x{:X} {}", symbol.address(), symbol.name().unwrap_or(""))
             }
         }
     }
