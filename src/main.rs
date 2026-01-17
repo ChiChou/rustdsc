@@ -1,6 +1,6 @@
 use memmap2::Mmap;
-use object::LittleEndian;
 use object::read::macho::DyldCache;
+use object::{LittleEndian, Object, ObjectSection};
 use std::error::Error;
 use std::fs::File;
 
@@ -76,6 +76,24 @@ fn cmd_images(cache: &DyldCache<LittleEndian>) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn cmd_sections(cache: &DyldCache<LittleEndian>) -> Result<(), Box<dyn Error>> {
+    for image in cache.images() {
+        println!("{}", image.path().unwrap());
+        let obj = image.parse_object().unwrap();
+        for section in obj.sections() {
+            let base = section.address();
+            let end = base + section.size();
+            println!(
+                "  {:16} 0x{:X}-0x{:X}",
+                section.name().unwrap_or("N/A"),
+                base,
+                end
+            );
+        }
+    }
+    Ok(())
+}
+
 fn cmd_dump(
     cache: &DyldCache<LittleEndian>,
     vmaddr: u64,
@@ -120,6 +138,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     with_dyld_cache(path, |cache| {
         match command {
             "images" => cmd_images(cache),
+            "sections" => cmd_sections(cache),
             "dump" => {
                 let addr_str = args.get(3).ok_or("Missing address for dump")?;
                 let vmaddr = parse_u64(addr_str).map_err(|e| format!("Invalid address: {}", e))?;
